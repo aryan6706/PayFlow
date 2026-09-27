@@ -26,7 +26,7 @@ app.config["SECRET_KEY"] = os.environ.get(
 )
 
 app.config["DATABASE"] = os.path.join(
-    app.root_path,
+    "/tmp",
     "payroll.db",
 )
 

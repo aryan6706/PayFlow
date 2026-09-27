@@ -1,0 +1,813 @@
+{% extends 'base.html' %}
+
+{% block title %}
+{{ 'Edit' if editing else 'Generate' }} Payroll | PayFlow
+{% endblock %}
+
+{% block content %}
+
+<div class="row justify-content-center">
+    <div class="col-lg-9">
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1 class="h2 mb-1">
+                    {{ 'Edit' if editing else 'Generate' }} Payroll
+                </h1>
+
+                <p class="text-muted mb-0">
+                    Attendance-based automated payroll calculation
+                </p>
+            </div>
+
+            <a class="btn btn-outline-secondary"
+               href="{{ url_for('payrolls') }}">
+                Back
+            </a>
+        </div>
+
+
+        <div class="card border-0 shadow-sm">
+
+            <div class="card-body p-4">
+
+                <form method="post">
+
+                    <input type="hidden"
+                           name="csrf_token"
+                           value="{{ csrf_token }}">
+
+
+                    <div class="row g-3">
+
+                        <!-- Employee -->
+
+                        <div class="col-md-6">
+
+                            <label class="form-label">
+                                Employee
+                            </label>
+
+                            {% if editing %}
+
+                            <input
+                                class="form-control"
+                                value="{{ employees[0].name }} ({{ employees[0].employee_code }})"
+                                readonly
+                            >
+
+                            {% else %}
+
+                            <select
+                                class="form-select"
+                                name="employee_id"
+                                id="employee_id"
+                                required
+                            >
+
+                                {% for e in employees %}
+
+                                <option
+                                    value="{{ e.id }}"
+                                    data-basic="{{ e.basic_salary }}"
+                                >
+                                    {{ e.name }}
+                                    ({{ e.employee_code }})
+                                    — {{ e.basic_salary|money }}
+                                </option>
+
+                                {% endfor %}
+
+                            </select>
+
+                            {% endif %}
+
+                        </div>
+
+
+                        <!-- Payroll Month -->
+
+                        <div class="col-md-6">
+
+                            <label class="form-label">
+                                Payroll Month
+                            </label>
+
+                            <input
+                                class="form-control"
+                                type="month"
+                                name="pay_month"
+                                value="{{ payroll.pay_month if payroll else current_month }}"
+                                required
+                            >
+
+                        </div>
+
+
+                        <!-- Attendance -->
+
+                        <div class="col-12 mt-4">
+
+                            <h5 class="mb-1">
+                                Attendance
+                            </h5>
+
+                            <p class="text-muted small mb-0">
+                                Enter attendance for the payroll month.
+                            </p>
+
+                        </div>
+
+
+                        <div class="col-md-4">
+
+                            <label class="form-label">
+                                Working Days
+                            </label>
+
+                            <input
+                                class="form-control payroll-input"
+                                type="number"
+                                name="working_days"
+                                min="1"
+                                max="31"
+                                step="1"
+                                value="{{ payroll.working_days if payroll else 26 }}"
+                                required
+                            >
+
+                            <div class="form-text">
+                                Example: 26
+                            </div>
+
+                        </div>
+
+
+                        <div class="col-md-4">
+
+                            <label class="form-label">
+                                Present Days
+                            </label>
+
+                            <input
+                                class="form-control payroll-input"
+                                type="number"
+                                name="present_days"
+                                min="0"
+                                max="31"
+                                step="1"
+                                value="{{ payroll.present_days if payroll else 26 }}"
+                                required
+                            >
+
+                        </div>
+
+
+                        <div class="col-md-4">
+
+                            <label class="form-label">
+                                Leave Days
+                            </label>
+
+                            <input
+                                class="form-control payroll-input"
+                                type="number"
+                                name="leave_days"
+                                min="0"
+                                max="31"
+                                step="1"
+                                value="{{ payroll.leave_days if payroll else 0 }}"
+                                required
+                            >
+
+                        </div>
+
+
+                        <!-- Earnings -->
+
+                        <div class="col-12 mt-4">
+
+                            <h5 class="mb-1">
+                                Earnings
+                            </h5>
+
+                            <p class="text-muted small mb-0">
+                                Configure employee earnings.
+                            </p>
+
+                        </div>
+
+
+                        <div class="col-md-6">
+
+                            <label class="form-label">
+                                Allowances (₹)
+                            </label>
+
+                            <input
+                                class="form-control payroll-input"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                name="allowances"
+                                value="{{ payroll.allowances if payroll else 0 }}"
+                            >
+
+                        </div>
+
+
+                        <div class="col-md-6">
+
+                            <label class="form-label">
+                                Overtime Hours
+                            </label>
+
+                            <input
+                                class="form-control payroll-input"
+                                type="number"
+                                min="0"
+                                step="0.5"
+                                name="overtime_hours"
+                                value="{{ payroll.overtime_hours if payroll else 0 }}"
+                            >
+
+                        </div>
+
+
+                        <div class="col-md-6">
+
+                            <label class="form-label">
+                                Overtime Rate / Hour (₹)
+                            </label>
+
+                            <input
+                                class="form-control payroll-input"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                name="overtime_rate"
+                                value="{{ payroll.overtime_rate if payroll else 0 }}"
+                            >
+
+                        </div>
+
+
+                        <!-- Automated Deductions -->
+
+                        <div class="col-12 mt-4">
+
+                            <h5 class="mb-1">
+                                Automated Deductions
+                            </h5>
+
+                            <p class="text-muted small mb-0">
+                                Demo/configurable deduction rules calculated automatically.
+                            </p>
+
+                        </div>
+
+
+                        <!-- PF -->
+
+                        <div class="col-md-6">
+
+                            <label class="form-label">
+                                Provident Fund (PF)
+                            </label>
+
+                            <div class="input-group">
+
+                                <input
+                                    class="form-control"
+                                    type="number"
+                                    name="pf_rate"
+                                    id="pf_rate"
+                                    min="0"
+                                    max="100"
+                                    step="0.1"
+                                    value="{{ payroll.pf_rate if payroll and payroll.pf_rate is defined else 12 }}"
+                                >
+
+                                <span class="input-group-text">
+                                    %
+                                </span>
+
+                            </div>
+
+                            <div class="form-text">
+                                Applied to attendance-adjusted salary.
+                            </div>
+
+                        </div>
+
+
+                        <!-- Professional Tax -->
+
+                        <div class="col-md-6">
+
+                            <label class="form-label">
+                                Professional Tax (₹)
+                            </label>
+
+                            <input
+                                class="form-control payroll-input"
+                                type="number"
+                                name="professional_tax"
+                                id="professional_tax"
+                                min="0"
+                                step="0.01"
+                                value="{{ payroll.professional_tax if payroll and payroll.professional_tax is defined else 200 }}"
+                            >
+
+                            <div class="form-text">
+                                Configurable monthly amount.
+                            </div>
+
+                        </div>
+
+
+                        <!-- Other deductions -->
+
+                        <div class="col-md-6">
+
+                            <label class="form-label">
+                                Other Deductions (₹)
+                            </label>
+
+                            <input
+                                class="form-control payroll-input"
+                                type="number"
+                                name="deductions"
+                                id="deductions"
+                                min="0"
+                                step="0.01"
+                                value="{{ payroll.deductions if payroll else 0 }}"
+                            >
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- Calculation -->
+
+                    <div class="card bg-light border-0 mt-4">
+
+                        <div class="card-body">
+
+                            <h5 class="mb-3">
+                                Payroll Calculation
+                            </h5>
+
+
+                            <div class="row g-2 small">
+
+                                <div class="col-6">
+                                    Basic Salary
+                                </div>
+
+                                <div class="col-6 text-end"
+                                     id="basic-preview">
+                                    ₹0.00
+                                </div>
+
+
+                                <div class="col-6">
+                                    Daily Salary
+                                </div>
+
+                                <div class="col-6 text-end"
+                                     id="daily-preview">
+                                    ₹0.00
+                                </div>
+
+
+                                <div class="col-6">
+                                    Attendance-adjusted Salary
+                                </div>
+
+                                <div class="col-6 text-end"
+                                     id="attendance-preview">
+                                    ₹0.00
+                                </div>
+
+
+                                <div class="col-6">
+                                    Allowances
+                                </div>
+
+                                <div class="col-6 text-end"
+                                     id="allowance-preview">
+                                    ₹0.00
+                                </div>
+
+
+                                <div class="col-6">
+                                    Overtime Pay
+                                </div>
+
+                                <div class="col-6 text-end"
+                                     id="overtime-preview">
+                                    ₹0.00
+                                </div>
+
+                            </div>
+
+
+                            <hr>
+
+
+                            <h6 class="text-danger">
+                                Deductions
+                            </h6>
+
+
+                            <div class="row g-2 small">
+
+                                <div class="col-6">
+                                    PF
+                                </div>
+
+                                <div class="col-6 text-end"
+                                     id="pf-preview">
+                                    ₹0.00
+                                </div>
+
+
+                                <div class="col-6">
+                                    Professional Tax
+                                </div>
+
+                                <div class="col-6 text-end"
+                                     id="pt-preview">
+                                    ₹0.00
+                                </div>
+
+
+                                <div class="col-6">
+                                    Other Deductions
+                                </div>
+
+                                <div class="col-6 text-end"
+                                     id="deduction-preview">
+                                    ₹0.00
+                                </div>
+
+
+                                <div class="col-6 fw-bold">
+                                    Total Deductions
+                                </div>
+
+                                <div class="col-6 text-end fw-bold"
+                                     id="total-deduction-preview">
+                                    ₹0.00
+                                </div>
+
+                            </div>
+
+
+                            <hr>
+
+
+                            <div class="d-flex justify-content-between align-items-center">
+
+                                <strong>
+                                    Estimated Net Salary
+                                </strong>
+
+                                <strong
+                                    class="fs-4 text-primary"
+                                    id="salary-preview"
+                                >
+                                    ₹0.00
+                                </strong>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- Validation -->
+
+                    <div
+                        id="validation-message"
+                        class="alert alert-danger mt-3 d-none"
+                    ></div>
+
+
+                    <button
+                        type="submit"
+                        id="submit-button"
+                        class="btn btn-primary mt-3"
+                    >
+                        {{ 'Save Changes' if editing else 'Calculate & Generate Payslip' }}
+                    </button>
+
+                </form>
+
+            </div>
+
+        </div>
+
+    </div>
+</div>
+
+
+<script>
+
+let basic = {% if editing %}
+    {{ employees[0].basic_salary|tojson }}
+{% else %}
+    {{ employees[0].basic_salary|tojson }}
+{% endif %};
+
+
+function value(name) {
+
+    const element =
+        document.querySelector(`[name="${name}"]`);
+
+    if (!element) {
+        return 0;
+    }
+
+    return Number(element.value) || 0;
+}
+
+
+function formatMoney(amount) {
+
+    return "₹" + amount.toLocaleString(
+        "en-IN",
+        {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }
+    );
+
+}
+
+
+function preview() {
+
+    const workingDays =
+        value("working_days");
+
+    const presentDays =
+        value("present_days");
+
+    const leaveDays =
+        value("leave_days");
+
+    const allowances =
+        value("allowances");
+
+    const overtimeHours =
+        value("overtime_hours");
+
+    const overtimeRate =
+        value("overtime_rate");
+
+    const pfRate =
+        value("pf_rate");
+
+    const professionalTax =
+        value("professional_tax");
+
+    const otherDeductions =
+        value("deductions");
+
+
+    const validation =
+        document.querySelector("#validation-message");
+
+    const submitButton =
+        document.querySelector("#submit-button");
+
+
+    validation.classList.add("d-none");
+
+    submitButton.disabled = false;
+
+
+    if (workingDays <= 0) {
+
+        validation.textContent =
+            "Working days must be greater than zero.";
+
+        validation.classList.remove("d-none");
+
+        submitButton.disabled = true;
+
+        return;
+    }
+
+
+    if (presentDays > workingDays) {
+
+        validation.textContent =
+            "Present days cannot exceed working days.";
+
+        validation.classList.remove("d-none");
+
+        submitButton.disabled = true;
+
+        return;
+    }
+
+
+    if (leaveDays > workingDays) {
+
+        validation.textContent =
+            "Leave days cannot exceed working days.";
+
+        validation.classList.remove("d-none");
+
+        submitButton.disabled = true;
+
+        return;
+    }
+
+
+    if (presentDays + leaveDays > workingDays) {
+
+        validation.textContent =
+            "Present days + leave days cannot exceed working days.";
+
+        validation.classList.remove("d-none");
+
+        submitButton.disabled = true;
+
+        return;
+    }
+
+
+    const dailySalary =
+        basic / workingDays;
+
+
+    const attendanceSalary =
+        dailySalary * presentDays;
+
+
+    const overtimePay =
+        overtimeHours * overtimeRate;
+
+
+    /*
+       Demo/configurable PF calculation.
+
+       PF is calculated as a percentage
+       of attendance-adjusted salary.
+    */
+
+    const pf =
+        attendanceSalary * (pfRate / 100);
+
+
+    const totalDeductions =
+        pf
+        + professionalTax
+        + otherDeductions;
+
+
+    const netSalary =
+        attendanceSalary
+        + allowances
+        + overtimePay
+        - totalDeductions;
+
+
+    document.querySelector(
+        "#basic-preview"
+    ).textContent =
+        formatMoney(basic);
+
+
+    document.querySelector(
+        "#daily-preview"
+    ).textContent =
+        formatMoney(dailySalary);
+
+
+    document.querySelector(
+        "#attendance-preview"
+    ).textContent =
+        formatMoney(attendanceSalary);
+
+
+    document.querySelector(
+        "#allowance-preview"
+    ).textContent =
+        formatMoney(allowances);
+
+
+    document.querySelector(
+        "#overtime-preview"
+    ).textContent =
+        formatMoney(overtimePay);
+
+
+    document.querySelector(
+        "#pf-preview"
+    ).textContent =
+        formatMoney(pf);
+
+
+    document.querySelector(
+        "#pt-preview"
+    ).textContent =
+        formatMoney(professionalTax);
+
+
+    document.querySelector(
+        "#deduction-preview"
+    ).textContent =
+        formatMoney(otherDeductions);
+
+
+    document.querySelector(
+        "#total-deduction-preview"
+    ).textContent =
+        formatMoney(totalDeductions);
+
+
+    document.querySelector(
+        "#salary-preview"
+    ).textContent =
+        formatMoney(netSalary);
+
+
+    if (netSalary < 0) {
+
+        validation.textContent =
+            "Deductions cannot make the net salary negative.";
+
+        validation.classList.remove("d-none");
+
+        submitButton.disabled = true;
+    }
+
+}
+
+
+/* Employee selection */
+
+const employeeSelect =
+    document.querySelector(
+        '[name="employee_id"]'
+    );
+
+
+if (employeeSelect) {
+
+    employeeSelect.addEventListener(
+        "change",
+        function () {
+
+            basic =
+                Number(
+                    employeeSelect
+                        .selectedOptions[0]
+                        .dataset
+                        .basic
+                );
+
+            preview();
+
+        }
+    );
+
+}
+
+
+/* Live calculation */
+
+document
+    .querySelectorAll(".payroll-input")
+    .forEach(
+        input =>
+            input.addEventListener(
+                "input",
+                preview
+            )
+    );
+
+
+document
+    .querySelector("#pf_rate")
+    .addEventListener(
+        "input",
+        preview
+    );
+
+
+/* Initial calculation */
+
+preview();
+
+</script>
+
+{% endblock %}

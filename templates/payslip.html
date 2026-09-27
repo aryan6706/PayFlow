@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+
+{% block title %}Payslip | PayFlow{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">Employee Payslip</h2>
+        <p class="text-muted mb-0">
+            {{ payroll.pay_month | month_name }}
+        </p>
+    </div>
+
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('payrolls') }}"
+           class="btn btn-outline-secondary">
+            Back
+        </a>
+
+        <a href="{{ url_for('edit_payroll', payroll_id=payroll.id) }}"
+           class="btn btn-primary">
+            Edit Payroll
+        </a>
+
+        <button onclick="window.print()"
+                class="btn btn-dark">
+            Print
+        </button>
+    </div>
+</div>
+
+
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-body p-4">
+
+        <div class="row mb-4">
+
+            <div class="col-md-6">
+                <h4 class="mb-1">{{ payroll.name }}</h4>
+
+                <div class="text-muted">
+                    {{ payroll.employee_code }}
+                </div>
+
+                <div class="text-muted">
+                    {{ payroll.designation }}
+                </div>
+
+                <div class="text-muted">
+                    {{ payroll.department }}
+                </div>
+            </div>
+
+            <div class="col-md-6 text-md-end mt-3 mt-md-0">
+                <div class="text-muted small">
+                    PAY PERIOD
+                </div>
+
+                <div class="fw-semibold">
+                    {{ payroll.pay_month | month_name }}
+                </div>
+
+                <div class="text-muted small mt-2">
+                    GENERATED
+                </div>
+
+                <div>
+                    {{ payroll.generated_at }}
+                </div>
+            </div>
+
+        </div>
+
+
+        <!-- Attendance -->
+
+        <div class="border rounded p-3 mb-4">
+            <h5 class="mb-3">Attendance</h5>
+
+            <div class="row g-3">
+
+                <div class="col-md-4">
+                    <div class="text-muted small">
+                        Working Days
+                    </div>
+                    <div class="fw-semibold">
+                        {{ payroll.working_days }}
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="text-muted small">
+                        Present Days
+                    </div>
+                    <div class="fw-semibold">
+                        {{ payroll.present_days }}
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="text-muted small">
+                        Leave Days
+                    </div>
+                    <div class="fw-semibold">
+                        {{ payroll.leave_days }}
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+
+        <div class="row g-4">
+
+            <!-- Earnings -->
+
+            <div class="col-md-6">
+
+                <div class="border rounded p-3 h-100">
+
+                    <h5 class="mb-3">
+                        Earnings
+                    </h5>
+
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Basic Salary</span>
+                        <span>
+                            {{ payroll.basic_salary | money }}
+                        </span>
+                    </div>
+
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Attendance-adjusted Salary</span>
+                        <span>
+                            {{ (
+                                payroll.basic_salary
+                                / payroll.working_days
+                                * payroll.present_days
+                            ) | money }}
+                        </span>
+                    </div>
+
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Allowances</span>
+                        <span>
+                            {{ payroll.allowances | money }}
+                        </span>
+                    </div>
+
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Overtime</span>
+                        <span>
+                            {{ payroll.overtime_pay | money }}
+                        </span>
+                    </div>
+
+                    <hr>
+
+                    <div class="d-flex justify-content-between fw-semibold">
+                        <span>Total Earnings</span>
+
+                        <span>
+                            {{
+                                (
+                                    payroll.basic_salary
+                                    / payroll.working_days
+                                    * payroll.present_days
+                                    + payroll.allowances
+                                    + payroll.overtime_pay
+                                ) | money
+                            }}
+                        </span>
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <!-- Deductions -->
+
+            <div class="col-md-6">
+
+                <div class="border rounded p-3 h-100">
+
+                    <h5 class="mb-3">
+                        Deductions
+                    </h5>
+
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>
+                            PF
+                            <small class="text-muted">
+                                ({{ payroll.pf_rate }}%)
+                            </small>
+                        </span>
+
+                        <span>
+                            {{ payroll.pf_amount | money }}
+                        </span>
+                    </div>
+
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Professional Tax</span>
+
+                        <span>
+                            {{ payroll.professional_tax | money }}
+                        </span>
+                    </div>
+
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Other Deductions</span>
+
+                        <span>
+                            {{ payroll.other_deductions | money }}
+                        </span>
+                    </div>
+
+                    <hr>
+
+                    <div class="d-flex justify-content-between fw-semibold">
+                        <span>Total Deductions</span>
+
+                        <span>
+                            {{ payroll.deductions | money }}
+                        </span>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- Net Salary -->
+
+        <div class="mt-4 p-4 rounded border bg-light">
+
+            <div class="d-flex justify-content-between align-items-center">
+
+                <div>
+                    <div class="text-muted small">
+                        NET SALARY
+                    </div>
+
+                    <h2 class="mb-0">
+                        {{ payroll.net_salary | money }}
+                    </h2>
+                </div>
+
+                <div class="text-end">
+                    <div class="text-muted small">
+                        PAYROLL STATUS
+                    </div>
+
+                    <span class="badge bg-success">
+                        Processed
+                    </span>
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- Calculation Explanation -->
+
+        <div class="mt-4">
+
+            <h6 class="fw-semibold">
+                Calculation Summary
+            </h6>
+
+            <p class="text-muted small mb-0">
+                Attendance-adjusted salary is calculated from the employee's
+                basic salary, working days and present days. Overtime is added
+                separately. PF, Professional Tax and Other Deductions are then
+                subtracted to determine the final net salary.
+            </p>
+
+        </div>
+
+        <div class="mt-3 text-muted small">
+            PF and Professional Tax are configurable demonstration rules and
+            should not be treated as legal or tax-compliance calculations.
+        </div>
+
+    </div>
+</div>
+
+
+<style>
+@media print {
+
+    body {
+        background: white !important;
+    }
+
+    .navbar,
+    .sidebar,
+    .btn,
+    footer {
+        display: none !important;
+    }
+
+    .card {
+        box-shadow: none !important;
+        border: 0 !important;
+    }
+
+    .container,
+    .container-fluid {
+        max-width: 100% !important;
+        width: 100% !important;
+    }
+
+}
+</style>
+
+{% endblock %}

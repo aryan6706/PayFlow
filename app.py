@@ -1,1292 +1,332 @@
+import os
+import sqlite3
+import csv
+import io
 from datetime import datetime
 from functools import wraps
-import os
-import secrets
-import sqlite3
-
 from flask import (
-    Flask,
-    flash,
-    g,
-    redirect,
-    render_template,
-    request,
-    session,
-    url_for,
+    Flask, render_template, request, redirect,
+    url_for, session, flash, Response, abort
 )
-
-from werkzeug.security import check_password_hash, generate_password_hash
-
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'payflow-secure-prod-key-7f9a2b')
 
-app.config["SECRET_KEY"] = os.environ.get(
-    "PAYFLOW_SECRET_KEY",
-    "mits-du-payflow-demo-key-change-before-deployment",
-)
-
-app.config["DATABASE"] = os.path.join(
-    "/tmp",
-    "payroll.db",
-)
-
-app.config["ADMIN_USERNAME"] = os.environ.get(
-    "PAYFLOW_ADMIN_USERNAME",
-    "admin",
-)
-
-app.config["ADMIN_PASSWORD_HASH"] = generate_password_hash(
-    os.environ.get("PAYFLOW_ADMIN_PASSWORD", "admin123"),
-    method="pbkdf2:sha256",
-)
-
-
-# ---------------------------------------------------------
-# DATABASE
-# ---------------------------------------------------------
+# Use /tmp on Vercel/serverless; use local directory for local testing
+if os.environ.get('VERCEL'):
+    app.config['DATABASE'] = '/tmp/payflow.db'
+else:
+    app.config['DATABASE'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'payflow.db')
 
 def get_db():
-    if "db" not in g:
-        g.db = sqlite3.connect(app.config["DATABASE"])
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
-
-    return g.db
-
-
-@app.teardown_appcontext
-def close_db(_error):
-    db = g.pop("db", None)
-
-    if db is not None:
-        db.close()
-
+    conn = sqlite3.connect(app.config['DATABASE'])
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 def init_db():
-    db = get_db()
+    with get_db() as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
 
-    db.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS employees (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            employee_code TEXT NOT NULL UNIQUE,
-            name TEXT NOT NULL,
-            department TEXT NOT NULL,
-            designation TEXT NOT NULL,
-            basic_salary REAL NOT NULL CHECK(basic_salary >= 0),
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
+            CREATE TABLE IF NOT EXISTS employees (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                emp_code TEXT UNIQUE NOT NULL,
+                full_name TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                department TEXT NOT NULL,
+                designation TEXT NOT NULL,
+                base_salary REAL NOT NULL CHECK(base_salary >= 0),
+                bank_account TEXT NOT NULL,
+                status TEXT CHECK(status IN ('Active', 'Inactive')) DEFAULT 'Active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
 
-        CREATE TABLE IF NOT EXISTS payrolls (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            employee_id INTEGER NOT NULL,
-            pay_month TEXT NOT NULL,
-            basic_salary REAL NOT NULL,
-
-            working_days INTEGER NOT NULL DEFAULT 26,
-            present_days INTEGER NOT NULL DEFAULT 26,
-            leave_days INTEGER NOT NULL DEFAULT 0,
-
-            allowances REAL NOT NULL DEFAULT 0,
-
-            -- Total deductions retained for compatibility
-            deductions REAL NOT NULL DEFAULT 0,
-
-            -- Automated deduction components
-            pf_rate REAL NOT NULL DEFAULT 12,
-            pf_amount REAL NOT NULL DEFAULT 0,
-            professional_tax REAL NOT NULL DEFAULT 200,
-            other_deductions REAL NOT NULL DEFAULT 0,
-
-            overtime_hours REAL NOT NULL DEFAULT 0,
-            overtime_rate REAL NOT NULL DEFAULT 0,
-            overtime_pay REAL NOT NULL DEFAULT 0,
-
-            net_salary REAL NOT NULL,
-
-            generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-            FOREIGN KEY (employee_id) REFERENCES employees(id),
-            UNIQUE(employee_id, pay_month)
-        );
-        """
-    )
-
-    # -----------------------------------------------------
-    # Migration for older PayFlow databases
-    # -----------------------------------------------------
-
-    columns = {
-        row["name"]
-        for row in db.execute(
-            "PRAGMA table_info(payrolls)"
-        ).fetchall()
-    }
-
-    migrations = [
-        (
-            "working_days",
-            "ALTER TABLE payrolls ADD COLUMN "
-            "working_days INTEGER NOT NULL DEFAULT 26",
-        ),
-        (
-            "present_days",
-            "ALTER TABLE payrolls ADD COLUMN "
-            "present_days INTEGER NOT NULL DEFAULT 26",
-        ),
-        (
-            "leave_days",
-            "ALTER TABLE payrolls ADD COLUMN "
-            "leave_days INTEGER NOT NULL DEFAULT 0",
-        ),
-        (
-            "pf_rate",
-            "ALTER TABLE payrolls ADD COLUMN "
-            "pf_rate REAL NOT NULL DEFAULT 12",
-        ),
-        (
-            "pf_amount",
-            "ALTER TABLE payrolls ADD COLUMN "
-            "pf_amount REAL NOT NULL DEFAULT 0",
-        ),
-        (
-            "professional_tax",
-            "ALTER TABLE payrolls ADD COLUMN "
-            "professional_tax REAL NOT NULL DEFAULT 200",
-        ),
-        (
-            "other_deductions",
-            "ALTER TABLE payrolls ADD COLUMN "
-            "other_deductions REAL NOT NULL DEFAULT 0",
-        ),
-    ]
-
-    for column_name, sql in migrations:
-        if column_name not in columns:
-            db.execute(sql)
-
-    db.commit()
-
-
-# ---------------------------------------------------------
-# AUTHENTICATION
-# ---------------------------------------------------------
-
-def login_required(view):
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        if not session.get("user"):
-            return redirect(url_for("login"))
-
-        return view(*args, **kwargs)
-
-    return wrapped
-
-
-# ---------------------------------------------------------
-# TEMPLATE HELPERS
-# ---------------------------------------------------------
-
-def money(value):
-    return f"₹{value:,.2f}"
-
-
-app.jinja_env.filters["money"] = money
-
-app.jinja_env.filters["month_name"] = (
-    lambda value: datetime.strptime(
-        value,
-        "%Y-%m"
-    ).strftime("%B %Y")
-)
-
-
-@app.context_processor
-def inject_template_utilities():
-    if "csrf_token" not in session:
-        session["csrf_token"] = secrets.token_urlsafe(24)
-
-    return {
-        "csrf_token": session["csrf_token"],
-        "current_year": datetime.now().year,
-    }
-
-
-# ---------------------------------------------------------
-# CSRF PROTECTION
-# ---------------------------------------------------------
+            CREATE TABLE IF NOT EXISTS payroll_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER NOT NULL,
+                pay_period TEXT NOT NULL,
+                base_salary REAL NOT NULL,
+                allowances REAL DEFAULT 0.0,
+                deductions REAL DEFAULT 0.0,
+                tax REAL DEFAULT 0.0,
+                net_salary REAL NOT NULL,
+                payment_status TEXT CHECK(payment_status IN ('Pending', 'Processed', 'Paid')) DEFAULT 'Processed',
+                payment_date DATE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE,
+                UNIQUE(employee_id, pay_period)
+            );
+        """)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM users")
+        if cur.fetchone()[0] == 0:
+            default_hash = generate_password_hash("admin123")
+            conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", ("admin", default_hash))
+        conn.commit()
 
 @app.before_request
-def protect_forms():
-    if (
-        request.method == "POST"
-        and request.form.get("csrf_token")
-        != session.get("csrf_token")
-    ):
-        flash(
-            "Your form session expired. Please try again.",
-            "warning",
-        )
+def ensure_db():
+    if not os.path.exists(app.config['DATABASE']):
+        init_db()
 
-        return redirect(
-            request.referrer or url_for("index")
-        )
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
-
-# ---------------------------------------------------------
-# VALIDATION HELPERS
-# ---------------------------------------------------------
-
-def valid_text(value):
-    """Require a short, non-blank text value."""
-    return bool(
-        value
-        and value.strip()
-        and len(value.strip()) <= 100
-    )
-
-
-def employee_values(form):
-    """Read and validate employee data before SQLite."""
-
-    values = tuple(
-        form.get(field, "").strip()
-        for field in (
-            "employee_code",
-            "name",
-            "department",
-            "designation",
-        )
-    )
-
-    salary = float(
-        form.get("basic_salary", "")
-    )
-
-    if (
-        not all(valid_text(value) for value in values)
-        or salary < 0
-    ):
-        raise ValueError
-
-    return (*values, salary)
-
-
-# ---------------------------------------------------------
-# PAYROLL CALCULATION
-# ---------------------------------------------------------
-
-def payroll_values(form, employee):
-    """
-    Calculate payroll using attendance, allowances,
-    automated deductions, other deductions and overtime.
-
-    PF and Professional Tax are configurable demo rules.
-    They are not intended to represent legal/tax compliance.
-    """
-
-    pay_month = form.get("pay_month", "")
-
-    working_days = int(
-        form.get("working_days", 26) or 26
-    )
-
-    present_days = int(
-        form.get("present_days", 26) or 26
-    )
-
-    leave_days = int(
-        form.get("leave_days", 0) or 0
-    )
-
-    allowances = float(
-        form.get("allowances", 0) or 0
-    )
-
-    pf_rate = float(
-        form.get("pf_rate", 12) or 12
-    )
-
-    professional_tax = float(
-        form.get("professional_tax", 200) or 200
-    )
-
-    # The current form calls this field "deductions".
-    # It represents Other Deductions.
-    other_deductions = float(
-        form.get("deductions", 0) or 0
-    )
-
-    overtime_hours = float(
-        form.get("overtime_hours", 0) or 0
-    )
-
-    overtime_rate = float(
-        form.get("overtime_rate", 0) or 0
-    )
-
-    # -----------------------------------------------------
-    # Validation
-    # -----------------------------------------------------
-
-    if (
-        not employee
-        or len(pay_month) != 7
-        or working_days <= 0
-        or present_days < 0
-        or leave_days < 0
-        or present_days > working_days
-        or leave_days > working_days
-        or present_days + leave_days > working_days
-        or pf_rate < 0
-        or pf_rate > 100
-        or min(
-            allowances,
-            professional_tax,
-            other_deductions,
-            overtime_hours,
-            overtime_rate,
-        ) < 0
-    ):
-        raise ValueError
-
-    # -----------------------------------------------------
-    # Attendance-based salary
-    # -----------------------------------------------------
-
-    daily_salary = (
-        employee["basic_salary"] / working_days
-    )
-
-    attendance_salary = (
-        daily_salary * present_days
-    )
-
-    # -----------------------------------------------------
-    # Overtime
-    # -----------------------------------------------------
-
-    overtime_pay = (
-        overtime_hours * overtime_rate
-    )
-
-    # -----------------------------------------------------
-    # Automated deductions
-    # -----------------------------------------------------
-
-    pf_amount = (
-        attendance_salary * pf_rate / 100
-    )
-
-    total_deductions = (
-        pf_amount
-        + professional_tax
-        + other_deductions
-    )
-
-    # -----------------------------------------------------
-    # Final salary
-    # -----------------------------------------------------
-
-    net_salary = (
-        attendance_salary
-        + allowances
-        + overtime_pay
-        - total_deductions
-    )
-
-    if net_salary < 0:
-        raise ValueError
-
-    return (
-        pay_month,
-        working_days,
-        present_days,
-        leave_days,
-        allowances,
-        pf_rate,
-        pf_amount,
-        professional_tax,
-        other_deductions,
-        total_deductions,
-        overtime_hours,
-        overtime_rate,
-        overtime_pay,
-        net_salary,
-    )
-
-
-# ---------------------------------------------------------
-# HOME
-# ---------------------------------------------------------
-
-@app.route("/")
-def index():
-    return redirect(
-        url_for("dashboard")
-        if session.get("user")
-        else url_for("login")
-    )
-
-
-# ---------------------------------------------------------
-# LOGIN
-# ---------------------------------------------------------
-
-@app.route("/login", methods=["GET", "POST"])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '').strip()
 
-    if request.method == "POST":
+        with get_db() as conn:
+            user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+            if user and check_password_hash(user['password_hash'], password):
+                session.clear()
+                session['user_id'] = user['id']
+                session['username'] = user['username']
+                return redirect(url_for('dashboard'))
 
-        if (
-            request.form.get("username")
-            == app.config["ADMIN_USERNAME"]
-            and check_password_hash(
-                app.config["ADMIN_PASSWORD_HASH"],
-                request.form.get("password", ""),
-            )
-        ):
+        flash("Invalid credentials.", "danger")
+    return render_template('login.html')
 
-            session["user"] = "Payroll Administrator"
-
-            return redirect(
-                url_for("dashboard")
-            )
-
-        flash(
-            "Invalid login. Try the demo credentials shown below.",
-            "danger",
-        )
-
-    return render_template("login.html")
-
-
-@app.route("/logout")
+@app.route('/logout')
 def logout():
-
     session.clear()
+    return redirect(url_for('login'))
 
-    return redirect(
-        url_for("login")
-    )
-
-
-# ---------------------------------------------------------
-# DASHBOARD
-# ---------------------------------------------------------
-
-@app.route("/dashboard")
+@app.route('/')
 @login_required
 def dashboard():
+    with get_db() as conn:
+        total_employees = conn.execute("SELECT COUNT(*) FROM employees WHERE status = 'Active'").fetchone()[0]
+        
+        current_period = datetime.now().strftime('%Y-%m')
+        payroll_stat = conn.execute("""
+            SELECT 
+                COUNT(*) as records_count,
+                COALESCE(SUM(net_salary), 0) as total_net,
+                COALESCE(SUM(tax), 0) as total_tax
+            FROM payroll_records 
+            WHERE pay_period = ?
+        """, (current_period,)).fetchone()
 
-    db = get_db()
-
-    employee_count = db.execute(
-        "SELECT COUNT(*) FROM employees"
-    ).fetchone()[0]
-
-    payroll_count = db.execute(
-        "SELECT COUNT(*) FROM payrolls"
-    ).fetchone()[0]
-
-    total_paid = db.execute(
-        "SELECT COALESCE(SUM(net_salary), 0) FROM payrolls"
-    ).fetchone()[0]
-
-    current_month = datetime.now().strftime("%Y-%m")
-
-    current_month_paid = db.execute(
-        """
-        SELECT COALESCE(SUM(net_salary), 0)
-        FROM payrolls
-        WHERE pay_month = ?
-        """,
-        (current_month,),
-    ).fetchone()[0]
-
-    department_count = db.execute(
-        "SELECT COUNT(DISTINCT department) FROM employees"
-    ).fetchone()[0]
-
-    recent = db.execute(
-        """
-        SELECT p.*, e.name, e.employee_code
-        FROM payrolls p
-        JOIN employees e
-            ON e.id = p.employee_id
-        ORDER BY p.generated_at DESC
-        LIMIT 5
-        """
-    ).fetchall()
+        recent_payrolls = conn.execute("""
+            SELECT p.*, e.full_name, e.emp_code, e.department
+            FROM payroll_records p
+            JOIN employees e ON p.employee_id = e.id
+            ORDER BY p.id DESC LIMIT 5
+        """).fetchall()
 
     return render_template(
-        "dashboard.html",
-        employee_count=employee_count,
-        payroll_count=payroll_count,
-        total_paid=total_paid,
-        current_month_paid=current_month_paid,
-        department_count=department_count,
-        current_month=current_month,
-        recent=recent,
+        'dashboard.html',
+        total_employees=total_employees,
+        current_period=current_period,
+        payroll_stat=payroll_stat,
+        recent_payrolls=recent_payrolls
     )
 
-
-# ---------------------------------------------------------
-# EMPLOYEES
-# ---------------------------------------------------------
-
-@app.route("/employees")
+@app.route('/employees')
 @login_required
 def employees():
+    with get_db() as conn:
+        all_employees = conn.execute("SELECT * FROM employees ORDER BY emp_code ASC").fetchall()
+    return render_template('employees.html', employees=all_employees)
 
-    query = request.args.get(
-        "q",
-        "",
-    ).strip()
-
-    rows = get_db().execute(
-        """
-        SELECT *
-        FROM employees
-        WHERE employee_code LIKE ?
-           OR name LIKE ?
-           OR department LIKE ?
-           OR designation LIKE ?
-        ORDER BY name
-        """,
-        tuple(
-            f"%{query}%"
-            for _ in range(4)
-        ),
-    ).fetchall()
-
-    return render_template(
-        "employees.html",
-        employees=rows,
-        query=query,
-    )
-
-
-@app.route("/employees/<int:employee_id>")
+@app.route('/employees/new', methods=['GET', 'POST'])
 @login_required
-def employee_detail(employee_id):
-
-    db = get_db()
-
-    employee = db.execute(
-        "SELECT * FROM employees WHERE id = ?",
-        (employee_id,),
-    ).fetchone()
-
-    if employee is None:
-
-        flash(
-            "Employee not found.",
-            "danger",
-        )
-
-        return redirect(
-            url_for("employees")
-        )
-
-    history = db.execute(
-        """
-        SELECT *
-        FROM payrolls
-        WHERE employee_id = ?
-        ORDER BY pay_month DESC
-        """,
-        (employee_id,),
-    ).fetchall()
-
-    total_paid = sum(
-        record["net_salary"]
-        for record in history
-    )
-
-    return render_template(
-        "employee_detail.html",
-        employee=employee,
-        history=history,
-        total_paid=total_paid,
-    )
-
-
-@app.route("/employees/add", methods=["GET", "POST"])
-@login_required
-def add_employee():
-
-    if request.method == "POST":
+def employee_create():
+    if request.method == 'POST':
+        emp_code = request.form.get('emp_code', '').strip().upper()
+        full_name = request.form.get('full_name', '').strip()
+        email = request.form.get('email', '').strip().lower()
+        department = request.form.get('department', '').strip()
+        designation = request.form.get('designation', '').strip()
+        base_salary = float(request.form.get('base_salary', 0))
+        bank_account = request.form.get('bank_account', '').strip()
+        status = request.form.get('status', 'Active')
 
         try:
+            with get_db() as conn:
+                conn.execute("""
+                    INSERT INTO employees (emp_code, full_name, email, department, designation, base_salary, bank_account, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (emp_code, full_name, email, department, designation, base_salary, bank_account, status))
+            flash("Employee added successfully.", "success")
+            return redirect(url_for('employees'))
+        except sqlite3.IntegrityError:
+            flash("Employee Code or Email already exists.", "danger")
 
-            db = get_db()
+    return render_template('employee_form.html', employee=None)
 
-            db.execute(
-                """
-                INSERT INTO employees
-                (
-                    employee_code,
-                    name,
-                    department,
-                    designation,
-                    basic_salary
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                employee_values(request.form),
-            )
-
-            db.commit()
-
-            flash(
-                "Employee added successfully.",
-                "success",
-            )
-
-            return redirect(
-                url_for("employees")
-            )
-
-        except (
-            ValueError,
-            sqlite3.IntegrityError,
-        ):
-
-            flash(
-                "Please use a unique employee ID and a valid salary.",
-                "danger",
-            )
-
-    return render_template(
-        "employee_form.html",
-        employee=None,
-    )
-
-
-@app.route(
-    "/employees/<int:employee_id>/edit",
-    methods=["GET", "POST"],
-)
+@app.route('/employees/<int:id>/edit', methods=['GET', 'POST'])
 @login_required
-def edit_employee(employee_id):
+def employee_edit(id):
+    with get_db() as conn:
+        emp = conn.execute("SELECT * FROM employees WHERE id = ?", (id,)).fetchone()
+        if not emp:
+            abort(404)
 
-    db = get_db()
+        if request.method == 'POST':
+            full_name = request.form.get('full_name', '').strip()
+            department = request.form.get('department', '').strip()
+            designation = request.form.get('designation', '').strip()
+            base_salary = float(request.form.get('base_salary', 0))
+            bank_account = request.form.get('bank_account', '').strip()
+            status = request.form.get('status', 'Active')
 
-    employee = db.execute(
-        "SELECT * FROM employees WHERE id = ?",
-        (employee_id,),
-    ).fetchone()
-
-    if employee is None:
-
-        flash(
-            "Employee not found.",
-            "danger",
-        )
-
-        return redirect(
-            url_for("employees")
-        )
-
-    if request.method == "POST":
-
-        try:
-
-            db.execute(
-                """
+            conn.execute("""
                 UPDATE employees
-                SET employee_code=?,
-                    name=?,
-                    department=?,
-                    designation=?,
-                    basic_salary=?
-                WHERE id=?
-                """,
-                (
-                    *employee_values(request.form),
-                    employee_id,
-                ),
-            )
+                SET full_name = ?, department = ?, designation = ?, base_salary = ?, bank_account = ?, status = ?
+                WHERE id = ?
+            """, (full_name, department, designation, base_salary, bank_account, status, id))
+            flash("Employee record updated.", "success")
+            return redirect(url_for('employees'))
 
-            db.commit()
+    return render_template('employee_form.html', employee=emp)
 
-            flash(
-                "Employee details updated.",
-                "success",
-            )
-
-            return redirect(
-                url_for("employees")
-            )
-
-        except (
-            ValueError,
-            sqlite3.IntegrityError,
-        ):
-
-            flash(
-                "Please use a unique employee ID and a valid salary.",
-                "danger",
-            )
-
-    return render_template(
-        "employee_form.html",
-        employee=employee,
-    )
-
-
-@app.route(
-    "/employees/<int:employee_id>/delete",
-    methods=["POST"],
-)
-@login_required
-def delete_employee(employee_id):
-
-    db = get_db()
-
-    db.execute(
-        "DELETE FROM payrolls WHERE employee_id = ?",
-        (employee_id,),
-    )
-
-    db.execute(
-        "DELETE FROM employees WHERE id = ?",
-        (employee_id,),
-    )
-
-    db.commit()
-
-    flash(
-        "Employee and related payroll records removed.",
-        "success",
-    )
-
-    return redirect(
-        url_for("employees")
-    )
-
-
-# ---------------------------------------------------------
-# DEMO DATA
-# ---------------------------------------------------------
-
-@app.route("/demo-data", methods=["POST"])
-@login_required
-def demo_data():
-
-    db = get_db()
-
-    if db.execute(
-        "SELECT COUNT(*) FROM employees"
-    ).fetchone()[0]:
-
-        flash(
-            "Demo data was not added because employee records already exist.",
-            "info",
-        )
-
-        return redirect(
-            url_for("dashboard")
-        )
-
-    staff = [
-        (
-            "MITS-101",
-            "Aarav Sharma",
-            "Information Technology",
-            "Systems Analyst",
-            48000,
-        ),
-        (
-            "MITS-102",
-            "Ananya Verma",
-            "Finance",
-            "Accounts Executive",
-            42000,
-        ),
-        (
-            "MITS-103",
-            "Rohan Mehta",
-            "Human Resources",
-            "HR Coordinator",
-            38000,
-        ),
-    ]
-
-    db.executemany(
-        """
-        INSERT INTO employees
-        (
-            employee_code,
-            name,
-            department,
-            designation,
-            basic_salary
-        )
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        staff,
-    )
-
-    db.commit()
-
-    flash(
-        "Three MITS DU sample employees are ready. Generate payroll to complete the demo.",
-        "success",
-    )
-
-    return redirect(
-        url_for("dashboard")
-    )
-
-
-# ---------------------------------------------------------
-# PAYROLL LIST
-# ---------------------------------------------------------
-
-@app.route("/payrolls")
+@app.route('/payrolls')
 @login_required
 def payrolls():
+    period = request.args.get('period', datetime.now().strftime('%Y-%m'))
+    with get_db() as conn:
+        records = conn.execute("""
+            SELECT p.*, e.emp_code, e.full_name, e.department 
+            FROM payroll_records p
+            JOIN employees e ON p.employee_id = e.id
+            WHERE p.pay_period = ?
+            ORDER BY e.emp_code ASC
+        """, (period,)).fetchall()
+    return render_template('payrolls.html', records=records, period=period)
 
-    rows = get_db().execute(
-        """
-        SELECT
-            p.*,
-            e.name,
-            e.employee_code,
-            e.department
-        FROM payrolls p
-        JOIN employees e
-            ON e.id = p.employee_id
-        ORDER BY
-            p.pay_month DESC,
-            p.id DESC
-        """
-    ).fetchall()
-
-    return render_template(
-        "payrolls.html",
-        payrolls=rows,
-    )
-
-
-# ---------------------------------------------------------
-# GENERATE PAYROLL
-# ---------------------------------------------------------
-
-@app.route(
-    "/payrolls/generate",
-    methods=["GET", "POST"],
-)
+@app.route('/payrolls/process', methods=['GET', 'POST'])
 @login_required
-def generate_payroll():
+def payroll_process():
+    if request.method == 'POST':
+        employee_id = int(request.form.get('employee_id'))
+        pay_period = request.form.get('pay_period', '').strip()
+        allowances = float(request.form.get('allowances', 0.0))
+        deductions = float(request.form.get('deductions', 0.0))
+        tax = float(request.form.get('tax', 0.0))
+        payment_status = request.form.get('payment_status', 'Processed')
+        payment_date = datetime.now().strftime('%Y-%m-%d')
 
-    db = get_db()
+        with get_db() as conn:
+            emp = conn.execute("SELECT base_salary FROM employees WHERE id = ?", (employee_id,)).fetchone()
+            if not emp:
+                flash("Selected employee does not exist.", "danger")
+                return redirect(url_for('payroll_process'))
 
-    employees = db.execute(
-        "SELECT * FROM employees ORDER BY name"
-    ).fetchall()
+            base_salary = emp['base_salary']
+            net_salary = round((base_salary + allowances) - (deductions + tax), 2)
 
-    if not employees:
+            try:
+                conn.execute("""
+                    INSERT INTO payroll_records (
+                        employee_id, pay_period, base_salary, allowances, 
+                        deductions, tax, net_salary, payment_status, payment_date
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (employee_id, pay_period, base_salary, allowances, deductions, tax, net_salary, payment_status, payment_date))
+                flash("Payroll calculated and recorded.", "success")
+                return redirect(url_for('payrolls', period=pay_period))
+            except sqlite3.IntegrityError:
+                flash(f"Payroll record for this employee in {pay_period} already exists.", "danger")
 
-        flash(
-            "Add an employee before generating payroll.",
-            "warning",
-        )
+    with get_db() as conn:
+        active_employees = conn.execute("SELECT id, emp_code, full_name, base_salary FROM employees WHERE status = 'Active' ORDER BY emp_code ASC").fetchall()
 
-        return redirect(
-            url_for("add_employee")
-        )
+    current_period = datetime.now().strftime('%Y-%m')
+    return render_template('payroll_form.html', employees=active_employees, current_period=current_period)
 
-    if request.method == "POST":
-
-        try:
-
-            employee_id = int(
-                request.form["employee_id"]
-            )
-
-            employee = db.execute(
-                """
-                SELECT *
-                FROM employees
-                WHERE id = ?
-                """,
-                (employee_id,),
-            ).fetchone()
-
-            (
-                pay_month,
-                working_days,
-                present_days,
-                leave_days,
-                allowances,
-                pf_rate,
-                pf_amount,
-                professional_tax,
-                other_deductions,
-                total_deductions,
-                overtime_hours,
-                overtime_rate,
-                overtime_pay,
-                net_salary,
-            ) = payroll_values(
-                request.form,
-                employee,
-            )
-
-            db.execute(
-                """
-                INSERT INTO payrolls
-                (
-                    employee_id,
-                    pay_month,
-                    basic_salary,
-                    working_days,
-                    present_days,
-                    leave_days,
-                    allowances,
-                    deductions,
-                    pf_rate,
-                    pf_amount,
-                    professional_tax,
-                    other_deductions,
-                    overtime_hours,
-                    overtime_rate,
-                    overtime_pay,
-                    net_salary
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    employee_id,
-                    pay_month,
-                    employee["basic_salary"],
-                    working_days,
-                    present_days,
-                    leave_days,
-                    allowances,
-                    total_deductions,
-                    pf_rate,
-                    pf_amount,
-                    professional_tax,
-                    other_deductions,
-                    overtime_hours,
-                    overtime_rate,
-                    overtime_pay,
-                    net_salary,
-                ),
-            )
-
-            db.commit()
-
-            payroll_id = db.execute(
-                "SELECT last_insert_rowid()"
-            ).fetchone()[0]
-
-            flash(
-                "Payroll generated successfully.",
-                "success",
-            )
-
-            return redirect(
-                url_for(
-                    "payslip",
-                    payroll_id=payroll_id,
-                )
-            )
-
-        except (
-            ValueError,
-            sqlite3.IntegrityError,
-        ):
-
-            flash(
-                "Use valid attendance values and non-negative amounts. "
-                "PF rate must be between 0 and 100. "
-                "Present days and leave days cannot exceed working days. "
-                "Each employee can have one payroll per month.",
-                "danger",
-            )
-
-    return render_template(
-        "payroll_form.html",
-        employees=employees,
-        current_month=datetime.now().strftime("%Y-%m"),
-    )
-
-
-# ---------------------------------------------------------
-# EDIT PAYROLL
-# ---------------------------------------------------------
-
-@app.route(
-    "/payrolls/<int:payroll_id>/edit",
-    methods=["GET", "POST"],
-)
+@app.route('/payrolls/<int:id>/payslip')
 @login_required
-def edit_payroll(payroll_id):
+def payslip(id):
+    with get_db() as conn:
+        record = conn.execute("""
+            SELECT p.*, e.emp_code, e.full_name, e.email, e.department, e.designation, e.bank_account
+            FROM payroll_records p
+            JOIN employees e ON p.employee_id = e.id
+            WHERE p.id = ?
+        """, (id,)).fetchone()
+        if not record:
+            abort(404)
+    return render_template('payslip.html', item=record)
 
-    db = get_db()
-
-    payroll = db.execute(
-        """
-        SELECT *
-        FROM payrolls
-        WHERE id = ?
-        """,
-        (payroll_id,),
-    ).fetchone()
-
-    if payroll is None:
-
-        flash(
-            "Payroll record not found.",
-            "danger",
-        )
-
-        return redirect(
-            url_for("payrolls")
-        )
-
-    employee = db.execute(
-        """
-        SELECT *
-        FROM employees
-        WHERE id = ?
-        """,
-        (payroll["employee_id"],),
-    ).fetchone()
-
-    if request.method == "POST":
-
-        try:
-
-            (
-                pay_month,
-                working_days,
-                present_days,
-                leave_days,
-                allowances,
-                pf_rate,
-                pf_amount,
-                professional_tax,
-                other_deductions,
-                total_deductions,
-                overtime_hours,
-                overtime_rate,
-                overtime_pay,
-                net_salary,
-            ) = payroll_values(
-                request.form,
-                employee,
-            )
-
-            db.execute(
-                """
-                UPDATE payrolls
-                SET
-                    pay_month=?,
-                    basic_salary=?,
-                    working_days=?,
-                    present_days=?,
-                    leave_days=?,
-                    allowances=?,
-                    deductions=?,
-                    pf_rate=?,
-                    pf_amount=?,
-                    professional_tax=?,
-                    other_deductions=?,
-                    overtime_hours=?,
-                    overtime_rate=?,
-                    overtime_pay=?,
-                    net_salary=?
-                WHERE id=?
-                """,
-                (
-                    pay_month,
-                    employee["basic_salary"],
-                    working_days,
-                    present_days,
-                    leave_days,
-                    allowances,
-                    total_deductions,
-                    pf_rate,
-                    pf_amount,
-                    professional_tax,
-                    other_deductions,
-                    overtime_hours,
-                    overtime_rate,
-                    overtime_pay,
-                    net_salary,
-                    payroll_id,
-                ),
-            )
-
-            db.commit()
-
-            flash(
-                "Payroll record updated.",
-                "success",
-            )
-
-            return redirect(
-                url_for(
-                    "payslip",
-                    payroll_id=payroll_id,
-                )
-            )
-
-        except (
-            ValueError,
-            sqlite3.IntegrityError,
-        ):
-
-            flash(
-                "Use valid attendance values and non-negative amounts. "
-                "PF rate must be between 0 and 100. "
-                "This employee may already have a payroll for that month.",
-                "danger",
-            )
-
-    return render_template(
-        "payroll_form.html",
-        employees=[employee],
-        payroll=payroll,
-        current_month=payroll["pay_month"],
-        editing=True,
-    )
-
-
-# ---------------------------------------------------------
-# DELETE PAYROLL
-# ---------------------------------------------------------
-
-@app.route(
-    "/payrolls/<int:payroll_id>/delete",
-    methods=["POST"],
-)
-@login_required
-def delete_payroll(payroll_id):
-
-    db = get_db()
-
-    db.execute(
-        "DELETE FROM payrolls WHERE id = ?",
-        (payroll_id,),
-    )
-
-    db.commit()
-
-    flash(
-        "Payroll record removed.",
-        "success",
-    )
-
-    return redirect(
-        url_for("payrolls")
-    )
-
-
-# ---------------------------------------------------------
-# REPORTS
-# ---------------------------------------------------------
-
-@app.route("/reports")
+@app.route('/reports')
 @login_required
 def reports():
+    with get_db() as conn:
+        period_summary = conn.execute("""
+            SELECT 
+                pay_period,
+                COUNT(id) as headcount,
+                SUM(base_salary) as total_base,
+                SUM(allowances) as total_allowances,
+                SUM(deductions) as total_deductions,
+                SUM(tax) as total_tax,
+                SUM(net_salary) as net_disbursed
+            FROM payroll_records
+            GROUP BY pay_period
+            ORDER BY pay_period DESC
+        """).fetchall()
 
-    db = get_db()
+        dept_summary = conn.execute("""
+            SELECT 
+                e.department,
+                COUNT(DISTINCT e.id) as emp_count,
+                COALESCE(SUM(p.net_salary), 0) as total_payroll_expenditure
+            FROM employees e
+            LEFT JOIN payroll_records p ON e.id = p.employee_id
+            GROUP BY e.department
+        """).fetchall()
 
-    departments = db.execute(
-        """
-        SELECT
-            e.department,
-            COUNT(DISTINCT e.id) AS employee_count,
-            COUNT(p.id) AS payroll_count,
-            COALESCE(SUM(p.net_salary), 0) AS total_paid
-        FROM employees e
-        LEFT JOIN payrolls p
-            ON p.employee_id = e.id
-        GROUP BY e.department
-        ORDER BY total_paid DESC, e.department
-        """
-    ).fetchall()
+    return render_template('reports.html', periods=period_summary, departments=dept_summary)
 
-    months = db.execute(
-        """
-        SELECT
-            pay_month,
-            COUNT(*) AS payroll_count,
-            COALESCE(SUM(net_salary), 0) AS total_paid
-        FROM payrolls
-        GROUP BY pay_month
-        ORDER BY pay_month DESC
-        """
-    ).fetchall()
-
-    return render_template(
-        "reports.html",
-        departments=departments,
-        months=months,
-    )
-
-
-# ---------------------------------------------------------
-# PAYSLIP
-# ---------------------------------------------------------
-
-@app.route(
-    "/payrolls/<int:payroll_id>/payslip"
-)
+@app.route('/export/payrolls')
 @login_required
-def payslip(payroll_id):
+def export_payrolls():
+    period = request.args.get('period', datetime.now().strftime('%Y-%m'))
+    with get_db() as conn:
+        records = conn.execute("""
+            SELECT 
+                p.id, e.emp_code, e.full_name, e.department, p.pay_period,
+                p.base_salary, p.allowances, p.deductions, p.tax, p.net_salary,
+                p.payment_status, p.payment_date
+            FROM payroll_records p
+            JOIN employees e ON p.employee_id = e.id
+            WHERE p.pay_period = ?
+            ORDER BY e.emp_code ASC
+        """, (period,)).fetchall()
 
-    row = get_db().execute(
-        """
-        SELECT
-            p.*,
-            e.name,
-            e.employee_code,
-            e.department,
-            e.designation
-        FROM payrolls p
-        JOIN employees e
-            ON e.id = p.employee_id
-        WHERE p.id = ?
-        """,
-        (payroll_id,),
-    ).fetchone()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        'Payroll ID', 'Employee Code', 'Full Name', 'Department', 'Period',
+        'Base Salary', 'Allowances', 'Deductions', 'Tax', 'Net Salary',
+        'Status', 'Payment Date'
+    ])
 
-    if row is None:
+    for row in records:
+        writer.writerow(list(row))
 
-        flash(
-            "Payslip not found.",
-            "danger",
-        )
-
-        return redirect(
-            url_for("payrolls")
-        )
-
-    return render_template(
-        "payslip.html",
-        payroll=row,
+    output.seek(0)
+    filename = f"payroll_export_{period}.csv"
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment;filename={filename}"}
     )
 
-
-# ---------------------------------------------------------
-# DATABASE INITIALIZATION
-# ---------------------------------------------------------
-
-with app.app_context():
-    init_db()
-
-
-# ---------------------------------------------------------
-# RUN APPLICATION
-# ---------------------------------------------------------
-
-if __name__ == "__main__":
-    app.run(debug=True)
+if __name__ == '__main__':
+    app.run(debug=False, host='0.0.0.0', port=5000)

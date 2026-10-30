@@ -1,44 +1,44 @@
-# PayFlow — Automated Employee Payroll System
+# PayFlow
 
-A compact Flask + SQLite college-project demo for managing employees and generating monthly payroll payslips.
+A minimal Flask + SQLite Payroll Management System for standard business operations.
 
-## Run it (beginner-friendly)
+## Run locally
 
-1. Open a terminal in this project folder.
-2. Create an isolated Python environment:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python app.py
+```
 
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
+Open `http://127.0.0.1:5000`.
 
-3. Install the only dependency and start the app:
-
-   ```bash
-   pip install -r requirements.txt
-   python app.py
-   ```
-
-4. Open the address printed in the terminal, usually `http://127.0.0.1:5000`.
-
-## Demo login
+The first boot creates an empty database at `instance/payflow.db` and one administrator account:
 
 - Username: `admin`
 - Password: `admin123`
 
-## Best demo flow
+Before deployment, set environment variables for a secure secret and admin password:
 
-1. Sign in.
-2. Go to **Employees** → **Add Employee**.
-3. Add `EMP001`, a name, department, job title, and basic monthly salary.
-4. Go to **Generate Payroll**. Enter allowances, deductions, and overtime.
-5. Generate the payslip, then show **Payroll History** and the **Dashboard**.
+```bash
+export PAYFLOW_SECRET_KEY='replace-with-a-long-random-value'
+export PAYFLOW_ADMIN_PASSWORD='replace-this-default-password'
+```
 
-## Salary formula
+Set these before the first boot. Existing administrator passwords are intentionally not overwritten.
 
-`Net Salary = Basic Salary + Allowances + (Overtime Hours × Overtime Rate) − Deductions`
+## Clean-up commands for a legacy copy
 
-## Notes
+Run these from the old project directory before replacing it with this distribution:
 
-- Data is saved locally in `payroll.db`, created automatically on first run.
-- This is intentionally a college-demo MVP, not a production payroll system. Change the secret key and replace the demo login before publishing it.
+```bash
+rm -f payroll.db payflow.db
+rm -rf instance .venv __pycache__ .pytest_cache __MACOSX
+find . -name '.DS_Store' -delete
+```
+
+Do not run these commands in a folder that contains data you need to keep.
+
+## Payroll formula
+
+`Net Salary = Base Salary + Allowances - Deductions - Tax`

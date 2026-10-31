@@ -1,1 +1,86 @@
-{% extends 'base.html' %}{% block title %}Reports · PayFlow{% endblock %}{% block content %}<div class="page-title"><div><p class="eyebrow">REPORTING</p><h1>Payroll summary</h1><p>Monthly totals for reconciliation and review.</p></div><a class="btn btn-light" href="{{ url_for('export_payrolls') }}">Export all CSV</a></div><section class="panel"><div class="table-responsive"><table><thead><tr><th>Pay period</th><th>Records</th><th>Base payroll</th><th>Allowances</th><th>Withholdings</th><th>Net paid</th></tr></thead><tbody>{% for m in monthly %}<tr><td><strong>{{ m.pay_period|period }}</strong></td><td>{{ m.record_count }}</td><td>{{ m.gross_base|money }}</td><td>{{ m.allowances|money }}</td><td>{{ m.withholdings|money }}</td><td class="net">{{ m.net_total|money }}</td></tr>{% else %}<tr><td colspan="6" class="empty">No payroll data is available yet.</td></tr>{% endfor %}</tbody></table></div></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Reports · PayFlow{% endblock %}
+{% block content %}
+<div class="page-title">
+  <div>
+    <p class="eyebrow">ANALYTICS</p>
+    <h1>Financial Reports</h1>
+    <p style="color: var(--muted);">Consolidated monthly and departmental salary expenditure in ₹.</p>
+  </div>
+  <a class="btn btn-light" href="{{ url_for('export_payrolls') }}">Download full CSV</a>
+</div>
+
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">MONTHLY REGISTER</p>
+      <h2>Period-wise summary</h2>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>Pay period</th>
+          <th>Employees paid</th>
+          <th>Basic total</th>
+          <th>Allowances</th>
+          <th>PF / Deductions</th>
+          <th>TDS / Tax</th>
+          <th>Net disbursed</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in periods %}
+        <tr>
+          <td><strong>{{ p.pay_period|period }}</strong></td>
+          <td>{{ p.headcount }}</td>
+          <td>{{ p.total_base|money }}</td>
+          <td>{{ p.total_allowances|money }}</td>
+          <td>{{ p.total_deductions|money }}</td>
+          <td>{{ p.total_tax|money }}</td>
+          <td><strong>{{ p.net_disbursed|money }}</strong></td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" class="empty">No monthly payroll data recorded yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">COST CENTERS</p>
+      <h2>Departmental breakdown</h2>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>Department</th>
+          <th>Headcount</th>
+          <th>Total net expenditure</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in departments %}
+        <tr>
+          <td><strong>{{ d.department }}</strong></td>
+          <td>{{ d.emp_count }}</td>
+          <td><strong>{{ d.total_payroll_expenditure|money }}</strong></td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="3" class="empty">No departments added yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

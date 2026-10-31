@@ -1,1 +1,68 @@
-{% extends 'base.html' %}{% block title %}Payroll ledger · PayFlow{% endblock %}{% block content %}<div class="page-title"><div><p class="eyebrow">PAYROLL</p><h1>Payroll ledger</h1><p>Filter, review, and export reconciled records.</p></div><a class="btn btn-dark" href="{{ url_for('new_payroll') }}">New payroll record</a></div><section class="panel"><form class="filters" method="get"><input type="month" name="period" value="{{ period_filter }}"><input name="q" value="{{ query }}" placeholder="Employee name or code"><button class="btn btn-light">Filter</button><a class="btn btn-light" href="{{ url_for('export_payrolls', period=period_filter) }}">Export CSV</a></form><div class="table-responsive"><table><thead><tr><th>Employee</th><th>Pay period</th><th>Gross</th><th>Overtime</th><th>Withheld</th><th>Net salary</th><th></th></tr></thead><tbody>{% for p in payrolls %}<tr><td><strong>{{ p.full_name }}</strong><small>{{ p.employee_code }} · {{ p.department }}</small></td><td>{{ p.pay_period|period }}</td><td>{{ p.gross_salary|money }}</td><td>{{ p.overtime_pay|money }}</td><td>{{ (p.leave_deduction + p.deductions + p.tax)|money }}</td><td class="net">{{ p.net_salary|money }}</td><td><a class="text-link" href="{{ url_for('payslip', payroll_id=p.id) }}">Payslip</a></td></tr>{% else %}<tr><td colspan="7" class="empty">No payroll records match this filter.</td></tr>{% endfor %}</tbody></table></div></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Payroll ledger · PayFlow{% endblock %}
+{% block content %}
+<div class="page-title">
+  <div>
+    <p class="eyebrow">DISBURSEMENTS</p>
+    <h1>Payroll ledger</h1>
+    <p style="color: var(--muted);">Complete salary register and printable payslip records in ₹.</p>
+  </div>
+  <div style="display: flex; gap: 10px;">
+    <a class="btn btn-light" href="{{ url_for('export_payrolls', period=period) }}">Export CSV</a>
+    <a class="btn btn-dark" href="{{ url_for('new_payroll') }}">New payroll record</a>
+  </div>
+</div>
+
+<section class="panel">
+  <form class="filters" method="get">
+    <input type="month" name="period" value="{{ period }}" style="max-width: 220px;">
+    <button type="submit" class="btn btn-light">Filter month</button>
+    {% if period %}
+      <a class="btn btn-light" href="{{ url_for('payrolls') }}">Show all</a>
+    {% endif %}
+  </form>
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Pay period</th>
+          <th>Basic (₹)</th>
+          <th>HRA / Allowances (₹)</th>
+          <th>PF / Deductions (₹)</th>
+          <th>TDS / Tax (₹)</th>
+          <th>Net salary (₹)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in records %}
+        <tr>
+          <td>
+            <strong>{{ r.full_name }}</strong>
+            <small>{{ r.employee_code }} · {{ r.department }}</small>
+          </td>
+          <td>{{ r.pay_period|period }}</td>
+          <td>{{ r.base_salary|money }}</td>
+          <td>{{ r.allowances|money }}</td>
+          <td>{{ r.deductions|money }}</td>
+          <td>{{ r.tax|money }}</td>
+          <td><strong>{{ r.net_salary|money }}</strong></td>
+          <td class="actions">
+            <a class="text-link" href="{{ url_for('payslip', payroll_id=r.id) }}">Payslip</a>
+            <form method="post" action="{{ url_for('delete_payroll', payroll_id=r.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="link-danger" onclick="return confirm('Delete this payroll entry?')">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8" class="empty">No payroll records found for this period.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

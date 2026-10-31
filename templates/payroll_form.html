@@ -1,18 +1,69 @@
 {% extends 'base.html' %}
 {% block title %}New payroll · PayFlow{% endblock %}
 {% block content %}
-<div class="page-title"><div><p class="eyebrow">PAYROLL</p><h1>New payroll record</h1><p>Enter attendance and compensation inputs. Every calculation is shown before you save.</p></div><a class="btn btn-light" href="{{ url_for('payrolls') }}">Cancel</a></div>
-<form method="post" class="payroll-workspace"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <section class="panel form-panel"><div class="section-label">1. Employee & period</div><div class="form-grid"><label>Employee<select name="employee_id" required>{% for e in employees %}<option value="{{ e.id }}" data-base="{{ e.base_salary }}">{{ e.full_name }} · {{ e.employee_code }}</option>{% endfor %}</select></label><label>Pay period<input type="month" name="pay_period" value="{{ current_period }}" required></label><label>Monthly base salary<input id="base-salary" readonly></label><label>Standard working days<input class="calc" type="number" min="1" max="31" step="0.5" name="working_days" value="22" required></label></div></section>
-  <div class="row g-3 mt-1"><div class="col-xl-7"><section class="panel form-panel h-100"><div class="section-label">2. Attendance & overtime</div><div class="form-grid"><label>Paid leave days <span class="field-help">Included in salary</span><input class="calc" type="number" min="0" step="0.5" name="paid_leave_days" value="0"></label><label>Unpaid leave days <span class="field-help">Deducted at daily rate</span><input class="calc" type="number" min="0" step="0.5" name="unpaid_leave_days" value="0"></label><label>Overtime hours<input class="calc" type="number" min="0" step="0.25" name="overtime_hours" value="0"></label><label>Overtime rate <span class="field-help">% of regular hourly rate</span><div class="input-suffix"><input class="calc" type="number" min="0" step="1" name="overtime_rate_percent" value="150"><span>%</span></div></label></div><div class="calculation-note">Overtime uses: monthly salary ÷ working days ÷ 8 hours × overtime rate.</div></section></div><div class="col-xl-5"><section class="panel form-panel h-100"><div class="section-label">3. Additions & withholdings</div><div class="stack-fields"><label>Allowances<input class="calc" type="number" min="0" step="0.01" name="allowances" value="0"></label><label>Other deductions<input class="calc" type="number" min="0" step="0.01" name="deductions" value="0"></label><label>Tax rate <div class="input-suffix"><input class="calc" type="number" min="0" max="100" step="0.01" name="tax_rate_percent" value="0"><span>%</span></div></label></div></section></div></div>
-  <section class="pay-summary"><div><span>Gross earnings</span><strong id="gross-preview">₹0.00</strong></div><div><span>Overtime pay</span><strong id="overtime-preview">₹0.00</strong></div><div><span>Total withholdings</span><strong id="withholding-preview">₹0.00</strong></div><div class="net-total"><span>Estimated net salary</span><strong id="net-preview">₹0.00</strong></div></section>
-  <div class="form-actions"><a class="btn btn-light" href="{{ url_for('payrolls') }}">Cancel</a><button class="btn btn-dark">Create payroll record</button></div>
-</form>
+<div class="page-title">
+  <div>
+    <p class="eyebrow">PAYROLL</p>
+    <h1>New payroll record</h1>
+    <p style="color: var(--muted);">Net salary in ₹ is calculated automatically on submission.</p>
+  </div>
+  <a class="btn btn-light" href="{{ url_for('payrolls') }}">Cancel</a>
+</div>
+
+<section class="panel form-panel">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form-grid">
+      <label>Employee
+        <select name="employee_id" required>
+          {% for e in employees %}
+            <option value="{{ e.id }}" data-base="{{ e.base_salary }}">{{ e.full_name }} · {{ e.employee_code }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Pay period
+        <input type="month" name="pay_period" value="{{ current_period }}" required>
+      </label>
+      <label>Basic salary (₹)
+        <input id="base" readonly value="{{ (employees[0].base_salary if employees else 0)|money }}">
+      </label>
+      <label>HRA & Special Allowances (₹)
+        <input class="calc" type="number" min="0" step="0.01" name="allowances" value="15000">
+      </label>
+      <label>PF & Other Deductions (₹)
+        <input class="calc" type="number" min="0" step="0.01" name="deductions" value="3600">
+      </label>
+      <label>TDS / Income Tax (₹)
+        <input class="calc" type="number" min="0" step="0.01" name="tax" value="4500">
+      </label>
+    </div>
+    <div class="net-preview">
+      <span>Estimated net payable salary</span>
+      <strong id="net-preview">₹0.00</strong>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-dark">Create payroll record</button>
+    </div>
+  </form>
+</section>
+
 <script>
-const money=value=>'₹'+Math.max(0,value).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
-const select=document.querySelector('[name="employee_id"]'); const number=name=>Number(document.querySelector(`[name="${name}"]`).value)||0;
-function calculate(){const base=Number(select.selectedOptions[0].dataset.base)||0,days=number('working_days')||1,paid=number('paid_leave_days'),unpaid=number('unpaid_leave_days'),hours=number('overtime_hours'),rate=number('overtime_rate_percent'),allowances=number('allowances'),deductions=number('deductions'),taxRate=number('tax_rate_percent'); const leave=Math.min(days,Math.max(0,unpaid))*base/days, overtime=(base/days/8)*hours*(rate/100),gross=base+allowances+overtime,taxable=Math.max(0,gross-leave-deductions),tax=taxable*(taxRate/100),withheld=leave+deductions+tax,net=Math.max(0,gross-withheld); document.querySelector('#base-salary').value=money(base);document.querySelector('#gross-preview').textContent=money(gross);document.querySelector('#overtime-preview').textContent=money(overtime);document.querySelector('#withholding-preview').textContent=money(withheld);document.querySelector('#net-preview').textContent=money(net);}
-select.addEventListener('change',calculate);document.querySelectorAll('.calc').forEach(input=>input.addEventListener('input',calculate));calculate();
+const select = document.querySelector('[name="employee_id"]');
+const base = document.querySelector('#base');
+const net = document.querySelector('#net-preview');
+const val = name => Number(document.querySelector(`[name="${name}"]`).value) || 0;
+
+function update() {
+  if (!select || !select.selectedOptions.length) return;
+  const b = Number(select.selectedOptions[0].dataset.base) || 0;
+  base.value = '₹' + b.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const total = b + val('allowances') - val('deductions') - val('tax');
+  net.textContent = '₹' + total.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+if (select) {
+  select.onchange = update;
+  document.querySelectorAll('.calc').forEach(el => el.oninput = update);
+  update();
+}
 </script>
-<style>.section-label{font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:800;color:#717b87;margin-bottom:18px}.field-help{display:block;color:#7b8490;font-size:11px;font-weight:400}.input-suffix{display:flex;align-items:center;border:1px solid #d8dde3;border-radius:6px;overflow:hidden}.input-suffix input{border:0;border-radius:0}.input-suffix span{padding:9px 11px;background:#f4f6f8;border-left:1px solid #d8dde3;color:#606a76}.stack-fields{display:grid;gap:18px}.calculation-note{font-size:12px;color:#69717d;background:#f5f7f9;padding:10px 12px;border-radius:6px;margin-top:18px}.pay-summary{display:grid;grid-template-columns:repeat(4,1fr);background:#fff;border:1px solid #e4e7eb;border-radius:9px;margin-top:14px;overflow:hidden}.pay-summary>div{padding:17px;border-right:1px solid #e4e7eb}.pay-summary span{display:block;color:#69717d;font-size:12px}.pay-summary strong{display:block;margin-top:5px;font-size:17px}.pay-summary .net-total{background:#20242a;color:#fff}.pay-summary .net-total span{color:#c7cdd4}@media(max-width:600px){.pay-summary{grid-template-columns:1fr 1fr}.pay-summary>div{border-bottom:1px solid #e4e7eb}}</style>
 {% endblock %}

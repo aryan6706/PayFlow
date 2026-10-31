@@ -1,1 +1,46 @@
-{% extends 'base.html' %}{% block title %}{{ 'Edit' if employee else 'Add' }} employee · PayFlow{% endblock %}{% block content %}<div class="page-title"><div><p class="eyebrow">DIRECTORY</p><h1>{{ 'Edit' if employee else 'Add' }} employee</h1></div><a class="btn btn-light" href="{{ url_for('employees') }}">Cancel</a></div><section class="panel form-panel"><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="form-grid"><label>Employee code<input name="employee_code" maxlength="120" value="{{ employee.employee_code if employee else '' }}" required></label><label>Full name<input name="full_name" maxlength="120" value="{{ employee.full_name if employee else '' }}" required></label><label>Department<input name="department" maxlength="120" value="{{ employee.department if employee else '' }}" required></label><label>Designation<input name="designation" maxlength="120" value="{{ employee.designation if employee else '' }}" required></label><label>Base salary<input type="number" min="0" step="0.01" name="base_salary" value="{{ employee.base_salary if employee else '' }}" required></label><label>Payment details<input name="payment_details" maxlength="120" value="{{ employee.payment_details if employee else '' }}" placeholder="Bank name / account reference" required></label><label>Status<select name="status"><option value="active" {% if not employee or employee.status=='active' %}selected{% endif %}>Active</option><option value="inactive" {% if employee and employee.status=='inactive' %}selected{% endif %}>Inactive</option></select></label></div><div class="form-actions"><button class="btn btn-dark">Save employee</button></div></form></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit' if employee else 'Add' }} employee · PayFlow{% endblock %}
+{% block content %}
+<div class="page-title">
+  <div>
+    <p class="eyebrow">DIRECTORY</p>
+    <h1>{{ 'Edit employee' if employee else 'Add employee' }}</h1>
+  </div>
+  <a class="btn btn-light" href="{{ url_for('employees') }}">Cancel</a>
+</div>
+
+<section class="panel form-panel">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form-grid">
+      <label>Employee code
+        <input type="text" name="employee_code" value="{{ employee.employee_code if employee else next_code }}" placeholder="e.g. EMP005" required>
+      </label>
+      <label>Full name
+        <input type="text" name="full_name" value="{{ employee.full_name if employee else '' }}" placeholder="e.g. Vikramaditya Rao" required>
+      </label>
+      <label>Department
+        <input type="text" name="department" value="{{ employee.department if employee else 'Engineering' }}" placeholder="e.g. Engineering" required>
+      </label>
+      <label>Designation
+        <input type="text" name="designation" value="{{ employee.designation if employee else 'Software Engineer' }}" placeholder="e.g. Senior Developer" required>
+      </label>
+      <label>Monthly basic salary (₹)
+        <input type="number" min="0" step="0.01" name="base_salary" value="{{ employee.base_salary if employee else '65000' }}" placeholder="e.g. 65000" required>
+      </label>
+      <label>Payment details (Bank / IFSC / A/C)
+        <input type="text" name="payment_details" value="{{ employee.payment_details if employee else 'HDFC Bank · NEFT' }}" placeholder="e.g. SBI / HDFC · IFSC" required>
+      </label>
+      <label>Status
+        <select name="status">
+          <option value="Active" {% if not employee or employee.status|lower == 'active' %}selected{% endif %}>Active</option>
+          <option value="Inactive" {% if employee and employee.status|lower == 'inactive' %}selected{% endif %}>Inactive</option>
+        </select>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-dark">Save employee</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

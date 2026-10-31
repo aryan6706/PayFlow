@@ -1,1 +1,24 @@
-{% extends 'base.html' %}{% block title %}Sign in · PayFlow{% endblock %}{% block content %}<section class="login-card"><div><p class="eyebrow">PAYROLL MANAGEMENT</p><h1>Welcome back.</h1><p>Sign in to manage employees, payroll records, and exports.</p></div><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Username<input name="username" autocomplete="username" required autofocus></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button class="btn btn-dark w-100">Sign in</button></form></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Sign in · PayFlow{% endblock %}
+{% block auth_content %}
+<div class="login-card">
+  <p class="eyebrow">INDIAN PAYROLL MANAGEMENT</p>
+  <h1 style="margin-bottom: 6px;">PayFlow</h1>
+  <p style="color: var(--muted); margin-bottom: 24px;">Sign in to access your payroll workspace (Default: admin / admin123).</p>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+  <form method="post" style="display: flex; flex-direction: column; gap: 16px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Username
+      <input type="text" name="username" value="admin" required autofocus>
+    </label>
+    <label>Password
+      <input type="password" name="password" value="admin123" required>
+    </label>
+    <button type="submit" class="btn btn-dark" style="margin-top: 8px; width: 100%;">Sign in</button>
+  </form>
+</div>
+{% endblock %}
